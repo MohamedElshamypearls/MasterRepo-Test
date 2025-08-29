@@ -16,38 +16,38 @@ jobs:
       - name: Checkout master repository
         uses: actions/checkout@v4
         with:
+          ref: main # Force checkout main branch
           token: ${{ secrets.GITHUB_TOKEN }}
           submodules: recursive
 
-      - name: Update submodules with auto-detected branches
+      - name: Determine default branch
+        id: get_branch
+        run: |
+          # Get the current branch name
+          CURRENT_BRANCH=$(git branch --show-current)
+          echo "branch=${CURRENT_BRANCH}" >> $GITHUB_OUTPUT
+          echo "Current branch: ${CURRENT_BRANCH}"
+
+      - name: Update submodules (try both main and master)
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
 
-          # Update each submodule individually with branch detection
           git submodule foreach '
             echo "Processing submodule: $name"
             git fetch origin
             
-            # Try to get the default branch from remote HEAD
-            DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed "s@^refs/remotes/origin/@@" || echo "")
-            
-            # If that fails, try to detect from available branches
-            if [ -z "$DEFAULT_BRANCH" ]; then
-              echo "Could not get default branch from HEAD, detecting..."
-              if git show-ref --verify --quiet refs/remotes/origin/main; then
-                DEFAULT_BRANCH="main"
-              elif git show-ref --verify --quiet refs/remotes/origin/master; then
-                DEFAULT_BRANCH="master"
-              else
-                echo "Error: Could not find main or master branch for $name"
-                exit 1
-              fi
+            # Try main first, then master
+            if git checkout main 2>/dev/null; then
+              echo "Using main branch for $name"
+              git pull origin main
+            elif git checkout master 2>/dev/null; then
+              echo "Using master branch for $name"
+              git pull origin master
+            else
+              echo "Error: Neither main nor master branch found for $name"
+              exit 1
             fi
-            
-            echo "Using branch: $DEFAULT_BRANCH for $name"
-            git checkout $DEFAULT_BRANCH
-            git pull origin $DEFAULT_BRANCH
           '
 
       - name: Check if there are changes
@@ -63,5 +63,5 @@ jobs:
         if: steps.verify-changed-files.outputs.changed == 'true'
         run: |
           git add .
-          git commit -m "Auto-update submodules to latest master commits"
-          git push origin master
+          git commit -m "Auto-update submodules to latest commits"
+          git push origin ${{ steps.get_branch.outputs.branch }}
